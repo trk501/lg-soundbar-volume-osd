@@ -1,47 +1,55 @@
 # LG Soundbar Volume OSD
 
-Zeigt auf einem **gerooteten LG webOS-Fernseher** die echte Lautstärke einer HDMI-ARC-Soundbar an (Zahl und Balken), statt nur der „+“/„–“-Pfeile, die LG bei externen Lautsprechern einblendet.
+On a **rooted LG webOS TV**, show the real volume of an HDMI-ARC soundbar (number and bar) instead of the bare "+"/"–" arrows LG displays for external speakers.
 
-*English summary below.*
+## How it works
 
-## Was es macht
+With a soundbar on HDMI-ARC/eARC, LG hides the volume number. Internally the TV only counts key presses, and that counter rarely matches the soundbar. The soundbar does report its actual volume back over HDMI-CEC ("Report Audio Status", opcode `0x7A`), but the TV ignores it.
 
-Bei einer Soundbar über HDMI-ARC/eARC zeigt LG keine Lautstärkezahl an. Der Fernseher zählt intern nur die Tastendrücke mit, und dieser Wert stimmt mit der Soundbar meist nicht überein. Die Soundbar meldet ihre tatsächliche Lautstärke aber per HDMI-CEC zurück („Report Audio Status“, Opcode `0x7A`). Der Fernseher ignoriert diese Meldung bisher.
+The fix has two parts:
 
-Die Lösung besteht aus zwei Teilen:
-
-| Datei | Aufgabe |
+| File | Purpose |
 |---|---|
-| `cec-sync.py` | Liest die CEC-Meldungen der Soundbar mit (`/var/log/cecmessages`, per inotify ohne Verzögerung) und setzt den Lautstärkewert des Fernsehers über `luna-send … setVolume` auf den echten Wert der Soundbar. |
-| `60-volume-osd` | Startskript für webOS Homebrew (`init.d`). Startet `cec-sync.py` und blendet über eine angepasste Kopie der QML-Dateien der Oberfläche Zahl und Balken auch bei externen Lautsprechern ein. Die Anzeige übernimmt dabei nur Werte von der Soundbar, nicht das eigene Mitzählen des Fernsehers. |
+| `cec-sync.py` | Follows the TV's CEC log (`/var/log/cecmessages`, woken instantly via inotify) and sets the TV's volume value to the soundbar's real value with `luna-send … setVolume`. |
+| `60-volume-osd` | A webOS Homebrew `init.d` script. It starts `cec-sync.py` and bind-mounts patched copies of the compositor's volume QML files, so the OSD shows the number and bar for external outputs as well. The OSD only shows values coming from the soundbar, never the TV's own key-press counter. |
 
-Eigenschaften:
+Properties:
 
-- Angezeigt wird **nur der Wert, den die Soundbar meldet**. Der Fernseher zählt nicht selbst.
-- Ist Soundbar oder Fernseher stumm geschaltet, wird nichts verändert, denn `setVolume` würde die Stummschaltung aufheben.
-- **Systemdateien werden nicht dauerhaft verändert.** Die QML-Dateien werden per `mount --bind` aus `/tmp` überlagert. Nach einem Neustart ohne das Startskript ist alles wieder original.
-- Sicherheitsnetze:
-  - Passen die erwarteten Textstellen nicht mehr (z. B. nach einem Firmware-Update), wird nichts eingesetzt und ein Eintrag ins Log geschrieben.
-  - Startet die Oberfläche (`surface-manager`) nach dem Einsetzen nicht, werden die Originale wiederhergestellt und die Lösung deaktiviert.
-- Der Hilfsprozess (`luna-send`-Abo) wird mit beendet, wenn `cec-sync.py` stirbt. Es bleiben keine Prozesse übrig.
+- **Only the value reported by the soundbar is shown.** The TV never counts on its own.
+- Nothing is changed while the TV or the soundbar is muted, because `setVolume` would unmute.
+- **No system files are modified permanently.** The QML files are overlaid from `/tmp` with `mount --bind`. Without the init script, a reboot restores the originals.
+- Safety nets:
+  - If the expected code in the QML files has changed (e.g. after a firmware update), nothing is applied and a line is written to the log.
+  - If the UI (`surface-manager`) fails to come back after patching, the originals are restored and the fix disables itself.
+- The helper process (a `luna-send` subscription) dies together with `cec-sync.py`, so no stray processes pile up.
 
-## Getestet mit
+## Tested with
 
-- LG OLED65B29LA (B2), webOS TV 10.3.2 laut `/etc/os-release`, gerootet mit webOS Homebrew Channel
-- Polk Command Bar über HDMI-ARC
-- Python 3.10 auf dem Fernseher
+- LG OLED65B29LA (B2), webOS TV 10.3.2 according to `/etc/os-release`, rooted with the webOS Homebrew Channel
+- Polk Command Bar on HDMI-ARC
+- Python 3.10 on the TV
 
-Andere Modelle und Soundbars können funktionieren, wenn die Soundbar „Report Audio Status“ per CEC sendet und die QML-Dateien der Oberfläche gleich aufgebaut sind. Rückmeldungen über Issues sind willkommen.
+Other TVs and soundbars may work if the soundbar sends "Report Audio Status" over CEC and the TV's volume QML files have the same structure. Reports of other working or non-working setups are welcome as issues.
 
-## Voraussetzungen
+## Requirements
 
-- Gerooteter LG-Fernseher mit [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) und SSH-Zugang als `root`
-- `python3` auf dem Fernseher
-- Soundbar über HDMI-ARC/eARC, SIMPLINK (HDMI-CEC) eingeschaltet
+- A rooted LG TV with the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) and root SSH access
+- `python3` on the TV (check with `python3 --version`)
+- Soundbar connected via HDMI-ARC/eARC, with SIMPLINK (HDMI-CEC) enabled on the TV
+
+## Check compatibility first
+
+Before installing, check that your soundbar reports its volume. Run this on the TV and press volume up/down on the remote:
+
+```sh
+tail -f /var/log/cecmessages | grep 507A
+```
+
+You should see lines containing `RX507A` followed by two hex digits (e.g. `RX507A1E` = volume 30). If nothing shows up, your soundbar does not report its volume over CEC and this fix cannot work.
 
 ## Installation
 
-Vom Computer aus (`<TV-IP>` durch die IP-Adresse des Fernsehers ersetzen):
+From your computer (replace `<TV-IP>` with your TV's IP address):
 
 ```sh
 ssh root@<TV-IP> 'mkdir -p /home/root/volume-osd'
@@ -50,51 +58,42 @@ scp 60-volume-osd root@<TV-IP>:/var/lib/webosbrew/init.d/
 ssh root@<TV-IP> 'chmod +x /home/root/volume-osd/cec-sync.py /var/lib/webosbrew/init.d/60-volume-osd'
 ```
 
-Danach den Fernseher neu starten, oder das Skript einmal von Hand ausführen:
+Then reboot the TV, or run the script once by hand:
 
 ```sh
 ssh root@<TV-IP> '/var/lib/webosbrew/init.d/60-volume-osd'
 ```
 
-Beim ersten Start wird die Oberfläche einmal neu geladen, der Bildschirm ist dabei kurz schwarz.
+On the first run the UI reloads once, so the screen goes black for a moment.
 
-Das Log liegt in `/home/root/volume-osd/log.txt`. Eine Zeile `… aktiv` bedeutet, dass alles eingesetzt wurde.
+The log is at `/home/root/volume-osd/log.txt`. A line ending in `aktiv` means everything was applied. A line saying `Original hat sich geändert – nichts eingesetzt` means your firmware's QML files differ and nothing was patched. (Log messages and code comments are in German.)
 
-## Abschalten und Deinstallieren
+> **Note:** If you download the files on Windows, make sure they keep Unix line endings (LF). Otherwise the scripts will not run on the TV.
 
-Vorübergehend abschalten (wirkt ab dem nächsten Neustart):
+## Disable / uninstall
+
+Disable temporarily (takes effect on the next reboot):
 
 ```sh
 ssh root@<TV-IP> 'touch /home/root/volume-osd/disable'
 ```
 
-Vollständig entfernen:
+Remove completely:
 
 ```sh
 ssh root@<TV-IP> 'rm /var/lib/webosbrew/init.d/60-volume-osd; rm -r /home/root/volume-osd; reboot'
 ```
 
-## Bekannte Grenzen
+## Known limitations
 
-- Die Anzeige kann nicht schneller sein als die Soundbar. Die Polk Command Bar meldet ihren neuen Wert etwa 0,1–0,2 s nach dem Tastendruck.
-- Der CEC-Dienst des Fernsehers schreibt manche Antworten der Soundbar erst verzögert ins Protokoll.
-- Die QML-Anpassung arbeitet mit Textersetzungen. Nach einem Firmware-Update kann sie sich daher abschalten. Das ist gewollt: lieber keine Zahl als eine kaputte Oberfläche.
+- The OSD cannot be faster than the soundbar. The Polk Command Bar reports its new value about 0.1–0.2 s after a key press.
+- The TV's CEC service sometimes writes the soundbar's reply to its log late, often only on the next key press.
+- The QML patch works by text replacement, so it may switch itself off after a firmware update. That is intentional: no number is better than a broken UI.
 
-## Haftungsausschluss
+## Disclaimer
 
-Nutzung auf eigene Gefahr. Das Projekt steht in keiner Verbindung zu LG Electronics oder Polk Audio. Root-Zugriff und Eingriffe in das System können zum Verlust der Garantie führen.
+Use at your own risk. This project is not affiliated with LG Electronics or Polk Audio. Rooting and modifying your TV may void your warranty.
 
----
+## License
 
-## English summary
-
-Shows the **real volume of an HDMI-ARC soundbar** (number and bar) on a **rooted LG webOS TV**, instead of the bare "+"/"–" arrows LG shows for external speakers.
-
-- `cec-sync.py` reads the soundbar's CEC "Report Audio Status" messages from `/var/log/cecmessages` (inotify, no polling delay) and sets the TV's volume value to match via `luna-send setVolume`. It never changes anything while the TV or the soundbar is muted.
-- `60-volume-osd` is a webOS Homebrew `init.d` script. It starts `cec-sync.py` and bind-mounts patched copies of the compositor's volume QML files so the OSD shows the number for external outputs. Only values coming from the soundbar are shown, never the TV's own key-press counter. Nothing is written to the system partition. If the expected code has changed (firmware update) or `surface-manager` fails to start, the script backs off and logs it.
-
-Tested on an LG OLED65B29LA (webOS TV 10.3.2) with a Polk Command Bar. For installation, see the `ssh`/`scp` commands above. Use at your own risk.
-
-## Lizenz / License
-
-MIT, siehe [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
