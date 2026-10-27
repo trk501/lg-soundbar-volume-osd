@@ -2,6 +2,8 @@
 
 On a **rooted LG webOS TV**, show the real volume of an HDMI-ARC soundbar (number and bar) instead of the bare "+"/"–" arrows LG displays for external speakers.
 
+> **Not supported: webOS 11** (`VERSION="11.x"` in `/etc/os-release`, e.g. 2024 models like the C4 on current firmware). There, LG rewrote the system UI in Flutter, so the volume OSD is compiled code and can't be patched this way. See [#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1).
+
 ## How it works
 
 With a soundbar on HDMI-ARC/eARC, LG hides the volume number. Internally the TV only counts key presses, and that counter rarely matches the soundbar. The soundbar does report its actual volume back over HDMI-CEC ("Report Audio Status", opcode `0x7A`), but the TV ignores it.
@@ -31,9 +33,14 @@ Properties:
 
 Other TVs and soundbars may work if the soundbar sends "Report Audio Status" over CEC and the TV's volume QML files have the same structure. Reports of other working or non-working setups are welcome as issues.
 
+Known not to work:
+
+- LG C4 on webOS 11.2.0: the UI is Flutter-based and has no QML files to patch ([#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1))
+
 ## Requirements
 
 - A rooted LG TV with the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) and root SSH access
+- webOS up to 10.x (check `VERSION` in `/etc/os-release`; webOS 11 is not supported, see above)
 - `python3` on the TV (check with `python3 --version`)
 - Soundbar connected via HDMI-ARC/eARC, with SIMPLINK (HDMI-CEC) enabled on the TV
 
