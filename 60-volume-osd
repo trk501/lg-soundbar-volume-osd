@@ -1,0 +1,60 @@
+#!/bin/sh
+# Lautstärke-Anzeige (Zahl + Balken) auch bei HDMI-ARC-Soundbar einblenden.
+# LG blendet sie aus, wenn "volumeSyncable" false ist. Außerdem zählt der TV nur Tastendrücke mit;
+# cec-sync.py setzt den Zähler auf den echten Wert der Soundbar (cause "setVolume"). Die Anzeige
+# übernimmt bei ARC nur diese Werte, damit man den TV nicht selbst zählen sieht.
+# Abschalten: touch /home/root/volume-osd/disable  (wirkt ab dem nächsten Neustart)
+
+DIR=/home/root/volume-osd
+VIEWS=/usr/lib/qml/WebOSCompositor/views
+VOL=$VIEWS/volume/StarfishVolume.qml
+VIEW=$VIEWS/StarfishVolumeView.qml
+TMP=/tmp/volume-osd
+LOG=$DIR/log.txt
+
+[ -e "$DIR/disable" ] && exit 0
+
+# Zähler des TVs mit der echten Lautstärke der Soundbar abgleichen
+pgrep -f "^python3 $DIR/cec-sync.py" >/dev/null || setsid nohup python3 "$DIR/cec-sync.py" </dev/null >/dev/null 2>&1 &
+
+mount | grep -q " $VOL " && exit 0
+
+(
+  mkdir -p $TMP
+  cp "$VOL" $TMP/StarfishVolume.qml
+  cp "$VIEW" $TMP/StarfishVolumeView.qml
+
+  # Zahl und Balken bei externen Ausgängen nicht mehr ausblenden, Pfeil-Symbole weg
+  sed -i 's/exterior && !syncable/false/g' $TMP/StarfishVolume.qml
+  # Angezeigt wird shownVolume statt des Live-Zählers
+  sed -i -e 's/LS\.audioService\.volume\([^A-Za-z]\)/root.shownVolume\1/g' \
+         -e 's/^\(    id: root\)$/\1\n    property int shownVolume: LS.audioService.volume/' $TMP/StarfishVolume.qml
+  sed -i -e 's/LS\.audioService\.volume\([^A-Za-z]\)/volume.shownVolume\1/g' \
+         -e 's/^\(    function updateVisibility() {\)$/\1\n        if (!(volume.exterior \&\& (LS.audioService.cause === "volumeUp" || LS.audioService.cause === "volumeDown")))\n            volume.shownVolume = LS.audioService.volume;/' $TMP/StarfishVolumeView.qml
+
+  # Nur einsetzen, wenn alle Ersetzungen genau wie erwartet gegriffen haben (z. B. nach Firmware-Update nicht mehr)
+  if grep -q "exterior && !syncable" $TMP/StarfishVolume.qml \
+     || [ "$(grep -c 'property int shownVolume' $TMP/StarfishVolume.qml)" != 1 ] \
+     || [ "$(grep -c 'volume.shownVolume = LS.audioService.volume' $TMP/StarfishVolumeView.qml)" != 1 ] \
+     || grep -E 'LS\.audioService\.volume([^A-Za-z]|$)' $TMP/StarfishVolume.qml | grep -qv 'shownVolume: LS' \
+     || grep -E 'LS\.audioService\.volume([^A-Za-z]|$)' $TMP/StarfishVolumeView.qml | grep -qv 'shownVolume = LS'; then
+    echo "$(date) Original hat sich geändert – nichts eingesetzt" >> "$LOG"
+    exit 0
+  fi
+
+  mount --bind $TMP/StarfishVolume.qml "$VOL"
+  mount --bind $TMP/StarfishVolumeView.qml "$VIEW"
+  systemctl restart surface-manager
+  sleep 15
+  if systemctl is-active -q surface-manager; then
+    echo "$(date) aktiv" >> "$LOG"
+  else
+    # Oberfläche kommt nicht hoch: Original zurück
+    umount "$VOL" "$VIEW"
+    systemctl restart surface-manager
+    touch "$DIR/disable"
+    echo "$(date) surface-manager startete nicht – zurückgesetzt und deaktiviert" >> "$LOG"
+  fi
+) </dev/null >/dev/null 2>&1 &
+
+exit 0
