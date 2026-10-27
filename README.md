@@ -2,7 +2,7 @@
 
 On a **rooted LG webOS TV**, show the real volume of an HDMI-ARC soundbar (number and bar) instead of the bare "+"/"–" arrows LG displays for external speakers.
 
-> **Not supported: webOS 11** (`VERSION="11.x"` in `/etc/os-release`, e.g. 2024 models like the C4 on current firmware). There, LG rewrote the system UI in Flutter, so the volume OSD is compiled code and can't be patched this way. See [#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1).
+**Works only up to webOS 10.x** (check `VERSION` in `/etc/os-release`). **webOS 11 is not supported:** LG rewrote the system UI in Flutter there, so the volume OSD is compiled code and can't be patched this way (see [#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1)).
 
 ## How it works
 
@@ -27,15 +27,17 @@ Properties:
 
 ## Tested with
 
+**Works:**
+
 - LG OLED65B29LA (B2), webOS TV 10.3.2 according to `/etc/os-release`, rooted with the webOS Homebrew Channel
 - Polk Command Bar on HDMI-ARC
 - Python 3.10 on the TV
 
-Other TVs and soundbars may work if the soundbar sends "Report Audio Status" over CEC and the TV's volume QML files have the same structure. Reports of other working or non-working setups are welcome as issues.
+**Does not work:**
 
-Known not to work:
+- LG C4, webOS TV 11.2.0: the UI is Flutter-based and has no QML files to patch ([#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1))
 
-- LG C4 on webOS 11.2.0: the UI is Flutter-based and has no QML files to patch ([#1](https://github.com/trk501/lg-soundbar-volume-osd/issues/1))
+Other TVs and soundbars on webOS 10.x or older may work if the soundbar sends "Report Audio Status" over CEC and the TV's volume QML files have the same structure. Reports of other working or non-working setups are welcome as issues.
 
 ## Requirements
 
