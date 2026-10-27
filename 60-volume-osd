@@ -19,6 +19,12 @@ pgrep -f "^python3 $DIR/cec-sync.py" >/dev/null || setsid nohup python3 "$DIR/ce
 
 mount | grep -q " $VOL " && exit 0
 
+# Andere Firmware (z. B. webOS 11) hat die Dateien woanders oder gar nicht
+if [ ! -f "$VOL" ] || [ ! -f "$VIEW" ]; then
+  echo "$(date) QML-Dateien nicht gefunden (Firmware nicht unterstützt) – nichts eingesetzt" >> "$LOG"
+  exit 0
+fi
+
 (
   mkdir -p $TMP
   cp "$VOL" $TMP/StarfishVolume.qml

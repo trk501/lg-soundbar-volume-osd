@@ -66,7 +66,7 @@ ssh root@<TV-IP> '/var/lib/webosbrew/init.d/60-volume-osd'
 
 On the first run the UI reloads once, so the screen goes black for a moment.
 
-The log is at `/home/root/volume-osd/log.txt`. A line ending in `aktiv` means everything was applied. A line saying `Original hat sich geändert – nichts eingesetzt` means your firmware's QML files differ and nothing was patched. (Log messages and code comments are in German.)
+The log is at `/home/root/volume-osd/log.txt`. A line ending in `aktiv` means everything was applied. A line saying `Original hat sich geändert – nichts eingesetzt` means your firmware's QML files differ and nothing was patched. `QML-Dateien nicht gefunden` means the files don't exist at all on your firmware (e.g. webOS 11), so it is not supported yet. (Log messages and code comments are in German.)
 
 > **Note:** If you download the files on Windows, make sure they keep Unix line endings (LF). Otherwise the scripts will not run on the TV.
 
