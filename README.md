@@ -32,6 +32,7 @@ Properties:
 - LG OLED65B29LA (B2), webOS TV 10.3.2 according to `/etc/os-release`, rooted with the webOS Homebrew Channel
 - Polk Command Bar on HDMI-ARC
 - Python 3.10 on the TV
+- Reported by users: LG C3 (webOS 10.3.1) with a Denon AVR-S930H (needs an [offset](#volume-offset) of -2), Sonos Arc
 
 **Does not work:**
 
@@ -78,6 +79,16 @@ On the first run the UI reloads once, so the screen goes black for a moment.
 The log is at `/home/root/volume-osd/log.txt`. A line ending in `aktiv` means everything was applied. A line saying `Original hat sich geändert – nichts eingesetzt` means your firmware's QML files differ and nothing was patched. `QML-Dateien nicht gefunden` means the files don't exist at all on your firmware (e.g. webOS 11), so it is not supported yet. (Log messages and code comments are in German.)
 
 > **Note:** If you download the files on Windows, make sure they keep Unix line endings (LF). Otherwise the scripts will not run on the TV.
+
+## Volume offset
+
+Some devices report a volume over CEC that is off from what they show themselves (e.g. a Denon AVR-S930H reports 2 too high). To correct the displayed value, put an offset into a file on the TV:
+
+```sh
+ssh root@<TV-IP> 'echo -2 > /home/root/volume-osd/offset'
+```
+
+The change takes effect with the next volume key press, no restart needed. Only the displayed value is shifted (and kept between 0 and 100), the real volume of your soundbar or AVR is not changed. To remove the offset, delete the file.
 
 ## Disable / uninstall
 

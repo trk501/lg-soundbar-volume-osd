@@ -10,6 +10,7 @@ import ctypes, json, os, re, select, subprocess, threading, time
 
 CEC_LOG = "/var/log/cecmessages"
 LOG = "/home/root/volume-osd/log.txt"
+OFFSET = "/home/root/volume-osd/offset"   # optional, z. B. "-2", falls die Soundbar falsch meldet
 AUDIO = "luna://com.webos.service.audio/master/"
 REPORT = re.compile(r" RX507A([0-9A-Fa-f]{2})")
 VOLUME_KEY = re.compile(r" TX05444[12]")   # TV -> Soundbar: Taste Lauter/Leiser gedrückt
@@ -61,12 +62,22 @@ def subscribe():
         time.sleep(1)
 
 
+def offset():
+    # Bei jeder Meldung neu lesen, damit eine Änderung ohne Neustart wirkt
+    try:
+        with open(OFFSET) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
 def apply(status):
     if status & 0x80:                 # Soundbar stumm
         return
     vol = status & 0x7F
     if vol > 100:
         return
+    vol = max(0, min(100, vol + offset()))
     if tv["mute"] is not False:       # TV stumm (oder unbekannt): nicht anfassen
         return
     # Nach einem Tastendruck immer setzen: der TV hat dann selbst mitgezählt und kann zufällig schon auf
