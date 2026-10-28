@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-# Übernimmt die echte Lautstärke der Soundbar in den Zähler des TVs.
-# Die Soundbar meldet sie per CEC "Report Audio Status" (5 -> 0, Opcode 7A), der TV ignoriert das sonst
-# und zählt nur Tastendrücke mit. setVolume ändert bei ARC nur den Zähler, hebt aber eine Stummschaltung
-# auf (und der TV schaltet dann die Soundbar wieder laut) – deshalb bei Stumm nichts anfassen.
-#
-# Nachfolger von cec-sync.sh: busybox "tail -F" schaut nur einmal pro Sekunde nach neuen Zeilen, das
-# machte die Anzeige träge. Hier weckt inotify sofort, wenn eine neue CEC-Meldung geschrieben wird.
-import ctypes, json, os, re, select, subprocess, threading, time
+# Übernimmt die Lautstärke, die die Soundbar per CEC meldet (Opcode 7A), in den Zähler des TVs.
+# Beim Tippen schickt tap() selbst "losgelassen", sonst springt die Soundbar wie bei gehaltener Taste.
+import ctypes, fcntl, json, os, re, select, struct, subprocess, threading, time
 
 CEC_LOG = "/var/log/cecmessages"
 LOG = "/home/root/volume-osd/log.txt"
 OFFSET = "/home/root/volume-osd/offset"   # optional, z. B. "-2", falls die Soundbar falsch meldet
+NO_TAP = "/home/root/volume-osd/no-tap"
 AUDIO = "luna://com.webos.service.audio/master/"
 REPORT = re.compile(r" RX507A([0-9A-Fa-f]{2})")
 VOLUME_KEY = re.compile(r" TX05444[12]")   # TV -> Soundbar: Taste Lauter/Leiser gedrückt
 KEY_WINDOW = 3.0   # so lange nach einem Tastendruck gilt eine Meldung als Antwort darauf
 IN_MODIFY = 0x2
+
+# Linux-CEC (/dev/cec0) und evdev
+CEC_S_MODE = 0x40046109
+CEC_TRANSMIT = 0xC0386105
+CEC_RECEIVE = 0xC0386106
+CEC_MSG = struct.Struct("=QQIIII16sBBBBBBBx")   # struct cec_msg
+CEC_MODE_INITIATOR, CEC_MODE_MONITOR = 0x01, 0xE0
+INPUT_EVENT = struct.Struct("llHHi")
+KEY_VOLUMEDOWN, KEY_VOLUMEUP = 114, 115
+HOLD = 0.35   # so lange nach dem Drücken auf das Loslassen warten, danach gilt die Taste als gehalten
 
 tv = {"volume": None, "mute": None}   # aus der getVolume-Subscription
 last_key = 0.0
@@ -136,7 +142,90 @@ def follow():
             os.close(ifd)
 
 
+def open_remotes():
+    # Fernbedienungen nur mitlesen (kein Grab); die Magic Remote kann nach dem Koppeln neu auftauchen
+    fds = {}
+    try:
+        devices = open("/proc/bus/input/devices").read()
+    except OSError:
+        return fds
+    for block in devices.split("\n\n"):
+        name = re.search(r'N: Name="([^"]*)"', block)
+        ev = re.search(r"\bevent(\d+)", block)
+        if name and ev and name.group(1).startswith("LGE"):
+            try:
+                fds[os.open("/dev/input/event" + ev.group(1), os.O_RDONLY | os.O_NONBLOCK)] = ev.group(1)
+            except OSError:
+                pass
+    return fds
+
+
+def tap():
+    # Monitor bekommt nur Kopien, eim erhält alle Nachrichten weiterhin; gesendet wird über ein eigenes fd
+    mon = os.open("/dev/cec0", os.O_RDWR | os.O_NONBLOCK)
+    fcntl.ioctl(mon, CEC_S_MODE, struct.pack("I", CEC_MODE_MONITOR))
+    tx = os.open("/dev/cec0", os.O_RDWR)
+    fcntl.ioctl(tx, CEC_S_MODE, struct.pack("I", CEC_MODE_INITIATOR))
+    release = CEC_MSG.pack(0, 0, 2, 0, 0, 0, b"\x05\x45", 0, 0, 0, 0, 0, 0, 0)
+    remotes, rescan = {}, 0.0
+    held, down_at = False, 0.0
+    pending = False    # TV hat "gedrückt" geschickt, noch ohne "losgelassen"
+    while True:
+        if time.monotonic() > rescan:
+            for fd in remotes:
+                os.close(fd)
+            remotes, rescan = open_remotes(), time.monotonic() + 30
+        r, _, _ = select.select([mon] + list(remotes), [], [], 0.02)
+        for fd in r:
+            if fd == mon:
+                buf = bytearray(CEC_MSG.size)
+                try:
+                    fcntl.ioctl(mon, CEC_RECEIVE, buf)
+                except OSError:
+                    continue
+                msg = CEC_MSG.unpack(buf)
+                data = msg[6][:msg[2]]
+                if data[:2] == b"\x05\x44" and data[2:3] in (b"\x41", b"\x42"):
+                    pending = True
+                elif data[:2] == b"\x05\x45":
+                    pending = False
+                continue
+            try:
+                raw = os.read(fd, INPUT_EVENT.size * 16)
+            except OSError:
+                rescan = 0.0   # Gerät weg (z. B. Fernbedienung entkoppelt)
+                continue
+            for i in range(0, len(raw) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+                _, _, typ, code, val = INPUT_EVENT.unpack_from(raw, i)
+                if typ == 1 and code in (KEY_VOLUMEUP, KEY_VOLUMEDOWN):
+                    if val == 1:
+                        held, down_at = True, time.monotonic()
+                    elif val == 0:
+                        held = False
+        if pending and not held:
+            pending = False
+            # Ohne lesbare Fernbedienung wäre jedes Halten ein Tippen
+            if remotes and not os.path.exists(NO_TAP):
+                try:
+                    fcntl.ioctl(tx, CEC_TRANSMIT, bytearray(release))
+                except OSError:
+                    pass
+        elif pending and time.monotonic() - down_at > HOLD:
+            pending = False   # gehalten: die Soundbar zählt selbst
+
+
+def tap_guarded():
+    # Fehler hier dürfen den Abgleich nicht stoppen
+    while True:
+        try:
+            tap()
+        except Exception as e:
+            log("cec-sync.py: Tipp-Erkennung abgebrochen: %r" % e)
+            time.sleep(30)
+
+
 threading.Thread(target=subscribe, daemon=True).start()
+threading.Thread(target=tap_guarded, daemon=True).start()
 try:
     follow()
 except Exception as e:

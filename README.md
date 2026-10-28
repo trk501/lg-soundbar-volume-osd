@@ -12,7 +12,7 @@ The fix has two parts:
 
 | File | Purpose |
 |---|---|
-| `cec-sync.py` | Follows the TV's CEC log (`/var/log/cecmessages`, woken instantly via inotify) and sets the TV's volume value to the soundbar's real value with `luna-send … setVolume`. |
+| `cec-sync.py` | Follows the TV's CEC log (`/var/log/cecmessages`, woken instantly via inotify) and sets the TV's volume value to the soundbar's real value with `luna-send … setVolume`. It also sends a "key released" after quick volume taps (see [Tapping](#tapping)). |
 | `60-volume-osd` | A webOS Homebrew `init.d` script. It starts `cec-sync.py` and bind-mounts patched copies of the compositor's volume QML files, so the OSD shows the number and bar for external outputs as well. The OSD only shows values coming from the soundbar, never the TV's own key-press counter. |
 
 Properties:
@@ -25,6 +25,18 @@ Properties:
   - If the UI (`surface-manager`) fails to come back after patching, the originals are restored and the fix disables itself.
 - The helper process (a `luna-send` subscription) dies together with `cec-sync.py`, so no stray processes pile up.
 
+### Tapping
+
+When you tap the volume key quickly, the TV often sends a new "key pressed" without a "key released" in between. Many soundbars treat that as a held key and jump several steps (e.g. 10 taps up, 12 steps down again).
+
+`cec-sync.py` therefore watches the remote (`/dev/input`, read-only, keys still reach the TV) and the CEC bus (`/dev/cec0` in monitor mode, so the TV's CEC service still gets every message). If the TV sends "key pressed" and the volume key is already released, it sends "key released" (`05 45`) itself, so each tap is exactly one step. While you hold the key, it does nothing and the soundbar repeats on its own as before.
+
+If `/dev/cec0` can't be opened, only this part stops (a line is written to the log), the volume sync keeps running. If no remote can be read, nothing is sent. To turn it off without a restart:
+
+```sh
+ssh root@<TV-IP> 'touch /home/root/volume-osd/no-tap'
+```
+
 ## Tested with
 
 **Works:**
@@ -34,6 +46,7 @@ Properties:
 Reported by users:
 
 - LG C3, webOS 10.3.1, Denon AVR-S930H (the AVR reports 2 too high, use an [offset](#volume-offset) of -2)
+- LG C2, webOS 10.3.1, Argon Audio SA2 stereo amplifier
 - Sonos Arc (TV model not reported)
 - webOS 9.2.2 (TV model and soundbar not reported): works, but the OSD stops at 60 while the soundbar goes up to 100. Cause still under investigation
 
@@ -109,8 +122,10 @@ ssh root@<TV-IP> 'rm /var/lib/webosbrew/init.d/60-volume-osd; rm -r /home/root/v
 
 ## Known limitations
 
-- The OSD cannot be faster than the soundbar. The Polk Command Bar reports its new value about 0.1–0.2 s after a key press.
-- The TV's CEC service sometimes writes the soundbar's reply to its log late, often only on the next key press.
+- The OSD cannot be faster than the soundbar. CEC is slow: a key press takes about 0.1 s on the bus, and the Polk Command Bar answers about 0.1 s later.
+- When you press quickly, the TV's CEC service often logs the soundbar's reply only together with the next key press, and several replies can arrive at once. Only the newest one is shown, so intermediate numbers can be skipped. The final value is always the soundbar's.
+- The TV sends at most about 4 volume presses per second. If you tap faster, it drops some, and the soundbar goes fewer steps than you pressed.
+- Soundbars only accept "one step up/down" over CEC. Setting an absolute volume needs CEC 2.0 ("Set Audio Volume Level"), which the Polk Command Bar (CEC 1.4) rejects.
 - The QML patch works by text replacement, so it may switch itself off after a firmware update. That is intentional: no number is better than a broken UI.
 
 ## Disclaimer
