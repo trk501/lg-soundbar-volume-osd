@@ -29,10 +29,13 @@ Properties:
 
 **Works:**
 
-- LG OLED65B29LA (B2), webOS TV 10.3.2 according to `/etc/os-release`, rooted with the webOS Homebrew Channel
-- Polk Command Bar on HDMI-ARC
-- Python 3.10 on the TV
-- Reported by users: LG C3 (webOS 10.3.1) with a Denon AVR-S930H (needs an [offset](#volume-offset) of -2), Sonos Arc
+- LG OLED65B29LA (B2), webOS TV 10.3.2 according to `/etc/os-release`, rooted with the webOS Homebrew Channel, Polk Command Bar on HDMI-ARC, Python 3.10 on the TV
+
+Reported by users:
+
+- LG C3, webOS 10.3.1, Denon AVR-S930H (the AVR reports 2 too high, use an [offset](#volume-offset) of -2)
+- Sonos Arc (TV model not reported)
+- webOS 9.2.2 (TV model and soundbar not reported): works, but the OSD stops at 60 while the soundbar goes up to 100. Cause still under investigation
 
 **Does not work:**
 
